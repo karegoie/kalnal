@@ -56,11 +56,15 @@ def ltr_extract():
 
 
 def kmer_count(kmer):
+    # TODO: split the scaffolds
     try:
-        subprocess(['kalnal-kmer/target/release/kalnal', kmer, 'temp/extract.fa', '>', 'temp/kmer_count.fa'], check = True)
+        subprocess(['kalnal-kmer/target/release/kalnal', kmer, 'temp/extract.fa', '>', 'temp/kmer_count.tsv'], check = True)
     except subprocess.CalledProcessError:
         print("Something went wrong with kalnal-kmer")
 
+    kmer_data = {}
+    with open('temp/kmer_count.tsv', 'r') as f:
+        kmer
 # TODO: adding
 
 
