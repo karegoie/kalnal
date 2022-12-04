@@ -27,10 +27,16 @@ def pre_processing(genome_path):
         for k, v in genome_data.items():
             print(f'>{k.replace(".", "/")}\n{v}\n')
 
+    del genome_data
+
+    return
+
 
 def ltr_extract():
     with open('temp/genome.fa', 'r') as f:
         with open('*.scn', 'r') as g:
+
+
 
 
 
