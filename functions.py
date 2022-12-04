@@ -16,16 +16,16 @@ def pre_processing(genome_path):
     genome_data = []
 
     with open(f'{genome_path}', 'r') as f:
-        for i, record in enumerate(SeqIO.parse(f, 'fasta')):
+        for record in SeqIO.parse(f, 'fasta'):
             if not (bool(re.compile('.*(hlo|ito|onti).*').search(record.description)))
                 genome_data[record.id] = str(record.seq)
 
     if os.path.exists('./temp'):
         os.makedir('./temp')
 
-    with open(f'temp/genome.fa', 'w') as f:
+    with open(f'temp/genome.fa', 'w') as g:
         for k, v in genome_data.items():
-            print(f'>{k.replace(".", "/")}\n{v}\n')
+            g.write(f'>{k.replace(".", "_")}\n{v}\n')
 
     del genome_data
 
@@ -33,15 +33,37 @@ def pre_processing(genome_path):
 
 
 def ltr_extract():
+    genome_data = []
     with open('temp/genome.fa', 'r') as f:
+        for record in SeqIO.parse(f, 'fasta'):
+            genome_data[record.id] = record.seq
+
+        extract = {}
         with open('*.scn', 'r') as g:
+            for line in g:
+                chro = str(line.split("\t")[1].strip())
+                start = int(line.split("\t")[2].strip().split("-")[0]) - 1
+                end = int(line.split("\t")[2].strip().split("-")[1]) - 1
+                if chro not in extract.keys(): extract[chro] = ''
+                extract[chro] += genome_data[record.id][start:end+1]
+
+        with open('temp/extract.fa', 'w') as h:
+            for k, v in extract.items():
+                h.write(f'>{k}\n{v}\n')
+
+    del genome_data
+    del extract
+
+
+def kmer_count(kmer):
+    try:
+        subprocess(['kalnal-kmer/target/release/kalnal', kmer, 'temp/extract.fa', '>', 'temp/kmer_count.fa'], check = True)
+    except subprocess.CalledProcessError:
+        print("Something went wrong with kalnal-kmer")
 
 
 
 
-
-
-def kmer_count():
 
 
 def finalize():
