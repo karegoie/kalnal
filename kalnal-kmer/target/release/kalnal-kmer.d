@@ -1,0 +1,1 @@
+/home/hyunsu/CS/code/kalnal/kalnal/target/release/kalnal-kmer: /home/hyunsu/CS/code/kalnal/kalnal/src/config.rs /home/hyunsu/CS/code/kalnal/kalnal/src/kmer.rs /home/hyunsu/CS/code/kalnal/kalnal/src/lib.rs /home/hyunsu/CS/code/kalnal/kalnal/src/main.rs /home/hyunsu/CS/code/kalnal/kalnal/src/startup.rs
