@@ -61,7 +61,10 @@ def kmer_count(kmer):
     except subprocess.CalledProcessError:
         print("Something went wrong with kalnal-kmer")
 
+# TODO: adding
 
+
+def ploting():
 
 
 
@@ -75,4 +78,16 @@ def finalize():
     if os.path.exists('./temp'):
         os.remove('temp/*')
         os.rmdir('./temp')
+
+
+def analyze(args):
+    pre_processing(args.genome)
+    ltr_finding(args.genome, args.threads)
+    ltr_extract()
+    kmer_count(args.kmer)
+    ploting()
+    finalize()
+
+
+
 
