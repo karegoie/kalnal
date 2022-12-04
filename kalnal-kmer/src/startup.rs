@@ -115,5 +115,5 @@ fn process_valid_bytes(kmer_map: &DashFx, kmer: Kmer) {
 }
 
 fn output(buf: &mut BufWriter<Stdout>, kmer: String, count: i32) {
-    writeln!(buf, ">{}\n{}", count, kmer).expect("Unable to write output.");
+    writeln!(buf, "{}\t{}", kmer, count).expect("Unable to write output.");
 }
