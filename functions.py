@@ -12,9 +12,11 @@ from matplotlib import pyplot as plt
 import copy
 import pandas as pd
 
-def ltr_finding(genome_path, threads):
+os.chdir('/data/HS_graduation/kalnal/')
+
+def ltr_finding(threads):
     try:
-        subprocess.run(['perl', 'ltrfinder/LTR_FINDER_parallel.pl', '-seq', f'{genome_path}', '-threads', f'{threads}'], check = True)
+        subprocess.run(['perl', 'ltrfinder/LTR_FINDER_parallel.pl', '-seq', 'temp/genome.fa', '-threads', f'{threads}'], check = True)
     except subprocess.CalledProcessError:
         print('Something went wrong......')
    
@@ -24,7 +26,7 @@ def pre_processing(genome_path):
 
     with open(f'{genome_path}', 'r') as f:
         for record in SeqIO.parse(f, 'fasta'):
-            if not (bool(re.compile('.*(hlo|ito|onti).*').search(record.description))):
+            if bool(re.compile('.*(chr).*').search(record.description)):
                 genome_data[f'{record.id}'] = str(record.seq)
 
     if not os.path.exists('./temp'):
@@ -51,10 +53,13 @@ def ltr_extract():
                     chro = str(line.split("\t")[1].strip())
                     start = int(line.split("\t")[2].strip().split("-")[0]) - 1
                     end = int(line.split("\t")[2].strip().split("-")[1]) - 1
-                    if chro not in extract.keys(): extract[chro] = ''
-                    extract[chro] += genome_data[record.id][start:end+1]
+                    if chro not in extract.keys(): extract[chro] = []
+                    extract[chro].append(str(genome_data[record.id][start:end+1]))
                 except ValueError:
                     continue
+
+        for k, v in extract.items():
+            extract[k] = ''.join(v)
 
         with open('temp/extract.fa', 'w') as h:
             for k, v in extract.items():
@@ -69,9 +74,10 @@ def kmer_count(kmer):
     os.system(split_command)
     try:
         file_list1 = [f for f in os.listdir('./temp') if f.endswith('.split.fa')]
+        print(file_list1)
         for split_file in file_list1:
             with open(f'temp/{split_file.split(".")[0]}_kmer_count.tsv', 'w') as f:
-                subprocess.run(['kalnal-kmer/target/release/kalnal-kmer', str(kmer), f'temp/{split_file}'], stdout=f, check = True)
+                subprocess.run(['kalnal-kmer/target/release/kalnal-kmer', f'{kmer}', f'temp/{split_file}'], stdout=f, check = True)
     except subprocess.CalledProcessError:
         print("Something went wrong with kalnal-kmer")
 
@@ -145,7 +151,7 @@ def finalize():
 
 def analyze(args):
     pre_processing(args.genome)
-    ltr_finding(args.genome, args.threads)
+    ltr_finding(args.threads)
     ltr_extract()
     kmer = int(args.kmer)
     for k in [kmer-4, kmer-2, kmer]:

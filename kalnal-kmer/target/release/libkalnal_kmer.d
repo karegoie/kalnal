@@ -1,1 +1,1 @@
-/home/hyunsu/CS/code/kalnal/kalnal-kmer/target/release/libkalnal_kmer.rlib: /home/hyunsu/CS/code/kalnal/kalnal-kmer/src/config.rs /home/hyunsu/CS/code/kalnal/kalnal-kmer/src/kmer.rs /home/hyunsu/CS/code/kalnal/kalnal-kmer/src/lib.rs /home/hyunsu/CS/code/kalnal/kalnal-kmer/src/startup.rs
+/data/HS_graduation/kalnal/kalnal-kmer/target/release/libkalnal_kmer.rlib: /data/HS_graduation/kalnal/kalnal-kmer/src/config.rs /data/HS_graduation/kalnal/kalnal-kmer/src/kmer.rs /data/HS_graduation/kalnal/kalnal-kmer/src/lib.rs /data/HS_graduation/kalnal/kalnal-kmer/src/startup.rs
