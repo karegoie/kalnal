@@ -144,11 +144,11 @@ def finalize():
 
 
 def analyze(args):
-#    pre_processing(args.genome)
-#    ltr_finding(args.genome, args.threads)
-#    ltr_extract()
-#    kmer = int(args.kmer)
-#    for k in [kmer-4, kmer-2, kmer]:
-#        kmer_count(k)
-#        ploting(k)
+    pre_processing(args.genome)
+    ltr_finding(args.genome, args.threads)
+    ltr_extract()
+    kmer = int(args.kmer)
+    for k in [kmer-4, kmer-2, kmer]:
+        kmer_count(k)
+        ploting(k)
     finalize()
