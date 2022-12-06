@@ -26,7 +26,7 @@ def pre_processing(genome_path):
 
     with open(f'{genome_path}', 'r') as f:
         for record in SeqIO.parse(f, 'fasta'):
-            if bool(re.compile('.*(chr).*').search(record.description)):
+            if bool(re.compile('.*(chr).*').search(record.description)) and not bool(re.compile('.*(ando).*').search(record.description)):
                 genome_data[f'{record.id}'] = str(record.seq)
 
     if not os.path.exists('./temp'):
@@ -63,7 +63,10 @@ def ltr_extract():
 
         with open('temp/extract.fa', 'w') as h:
             for k, v in extract.items():
-                h.write(f'>{k}\n{v.upper()}\n')
+                if len(v):
+                    h.write(f'>{k}\n{v.upper()}\n')
+                else:
+                    continue
 
     del genome_data
     del extract
@@ -74,7 +77,6 @@ def kmer_count(kmer):
     os.system(split_command)
     try:
         file_list1 = [f for f in os.listdir('./temp') if f.endswith('.split.fa')]
-        print(file_list1)
         for split_file in file_list1:
             with open(f'temp/{split_file.split(".")[0]}_kmer_count.tsv', 'w') as f:
                 subprocess.run(['kalnal-kmer/target/release/kalnal-kmer', f'{kmer}', f'temp/{split_file}'], stdout=f, check = True)
@@ -100,27 +102,26 @@ def kmer_count(kmer):
     del kmer_data
     
 
-def dict2ndarray(d, kmer):
+def dict2dict(d, kmer):
     kmer_list = []
     for i in itertools.product(['A', 'T', 'G', 'C', 'N'], repeat=kmer):
         kmer_list.append(''.join(i))
 
-    real_data = copy.deepcopy(d)
-    for k1, v1 in d.items():
+    for k1, v1 in d.copy().items():
         for mer in kmer_list:
-            if mer not in v1.keys(): real_data[k1][mer] = 0
+            if mer not in v1.keys(): d[k1][mer] = 0
 
-    for k1, v1 in real_data.items():
-        real_data[k1] = sorted(v1.items())
-
-    del d
+    for k1, v1 in d.items():
+        d[k1] = sorted(v1.items())
     
     final_data = {}
-    for k, v in real_data.items():
+    for k, v in d.items():
         for mer, n in v:
             if k not in final_data.keys(): final_data[k] = []
             final_data[k].append(n)
-   
+    
+    del d
+
     return final_data
 
 
@@ -129,7 +130,7 @@ def ploting(kmer):
         data = dict(json.load(f))
 
     plt.figure(figsize=(30, 20))
-    data = dict2ndarray(data, kmer)
+    data = dict2dict(data, kmer)
     data = pd.DataFrame(data)
     linked = linkage(data.T, method='ward')
     dend = dendrogram(linked, orientation='top', distance_sort='descending', labels=list(data.T.index), show_leaf_counts=True)
@@ -142,6 +143,8 @@ def finalize():
         os.remove([f for f in os.listdir() if f.endswith('.scn')][0])
         os.remove([f for f in os.listdir() if f.endswith('.gff3')][0])
         os.remove([f for f in os.listdir() if f.endswith('.list')][0])
+        for r in [f for f in os.listdir() if f.startswith('genome')]:
+            os.remove(r)
 
     if os.path.exists('./temp'):
         for r in os.listdir('./temp'):
