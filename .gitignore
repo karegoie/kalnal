@@ -1,3 +1,4 @@
 *.fna
 *fna*
-__pycache__
+__pycache__/
+*.png
