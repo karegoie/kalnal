@@ -1,1 +1,0 @@
-/data/HS_graduation/kalnal/kalnal-kmer/target/release/kalnal-kmer: /data/HS_graduation/kalnal/kalnal-kmer/src/config.rs /data/HS_graduation/kalnal/kalnal-kmer/src/kmer.rs /data/HS_graduation/kalnal/kalnal-kmer/src/lib.rs /data/HS_graduation/kalnal/kalnal-kmer/src/main.rs /data/HS_graduation/kalnal/kalnal-kmer/src/startup.rs
