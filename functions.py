@@ -12,7 +12,6 @@ from matplotlib import pyplot as plt
 import copy
 import pandas as pd
 
-os.chdir('/data/HS_graduation/kalnal/')
 
 def ltr_finding(threads):
     try:

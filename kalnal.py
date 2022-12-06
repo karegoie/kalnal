@@ -2,6 +2,8 @@
 
 import argparse
 from functions import analyze
+import os
+os.chdir('/data/HS_graduation/kalnal/')
 
 def parse():
     parser = argparse.ArgumentParser(description="Kalnal - The polyploid subgenome divider", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
