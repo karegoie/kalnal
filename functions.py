@@ -102,169 +102,171 @@ def kmer_count(kmer):
     del kmer_data
 
 class pDict(object):
-	#=====================================================================================
-	FOLER='/home/hyunsu/tmp'
-	INT_PREFIX='__int__'
-	#=====================================================================================
-	def _open(self):
-		if not os.path.isdir(self.FOLER):
-			self.FOLER = '/tmp'
-		if not os.path.isdir(self.FOLER):
-			raise IOError('Cannot wirte at folder "%s"' % self.FOLER)
-		while (True):
-			self.filename = '%s/.%08d.__dict__' % (self.FOLER, randint(1,99999999))
-			if not os.path.exists(self.filename):
-				break
-		self.d = shelve.open(self.filename)
-	#=====================================================================================
-	def _close(self, is_delete=True):
-		if self.d is not None:
-			self.d.close()
-			self.d = None
-		if is_delete and os.path.exists(self.filename):
-			os.remove(self.filename)
-	#=====================================================================================
-	def __init__(self, d={}):
-		self.filename = None
-		self.d = None
-		self._open()
-		if d and not isinstance(d, (dict, pDict)):
-			raise ReferenceError('pDict construct need only dict or pDict type but <%s>'
-				% str(type(d)))
-		for k, v in d.items():
-			self.__setitem__(k, v)
-	#=====================================================================================
-	def __del__(self):
-		self._close()
-	#=====================================================================================
-	def __repr__(self):
-		rl = list()
-		rl.append('{')
-		for i,k in enumerate(sorted(self.d.keys())):
-			if i > 0: rl.append(',')
-			rk = self.__r_keytransform__(k)
-			if isinstance(rk, str):
-				rk = '"%s"' % rk
-			rv = self.d[k]
-			if isinstance(rv, str):
-				rv = '"%s"' % rv
-			rl.append('%s:%s'%(rk,rv))
-		rl.append('}')
-		return ''.join(rl)
-	#=====================================================================================
-	def __getitem__(self, key):
-		if isinstance(key, slice):
-			return [ self.d[self.__keytransform__(k)]
-			         for k in range(key.start, key.stop, key.step) ]
-		return self.d[self.__keytransform__(key)]
-	#=====================================================================================
-	def __setitem__(self, key, value):
-		self.d[self.__keytransform__(key)] = value
-	#=====================================================================================
-	def __delitem__(self, key):
-		r = self.d[self.__keytransform__(key)]
-		del self.d[self.__keytransform__(key)]
-		return r
-	#=====================================================================================
-	def __iter__(self):
-		return iter(self.d)
-	#=====================================================================================
-	def __len__(self):
-		return len(self.d)
-	#=====================================================================================
-	def __keytransform__(self, key):
-		if isinstance(key, str):
-			return key
-		if isinstance(key, (int, int)):
-			return '%s%10d' % (self.INT_PREFIX, key)
-		return str(key)
-	#=====================================================================================
-	def __r_keytransform__(self, key):
-		if key.startswith(self.INT_PREFIX):
-			return int(key[len(self.INT_PREFIX):].strip())
-		return key
-	#=====================================================================================
-	def __contains__(self, key):
-		# return self.__keytransform__(key) in self.d
-		return self.has_key(key)
-	#=====================================================================================
-	def has_key(self, key):
-		return self.d.has_key(self.__keytransform__(key))
-	#=====================================================================================
-	def keys(self):
-		# for k in self.d.keys():
-		# 	yield self.__r_keytransform__(k)
-		return [ self.__r_keytransform__(k) for k in sorted(self.d.keys()) ]
-	#=====================================================================================
-	def values(self):
-		vl = list()
-		for k in sorted(self.d.keys()):
-			# yield self.d[k]
-			vl.append(self.d[k])
-		return vl
-	#=====================================================================================
-	def items(self):
-		for k in sorted(self.d.keys()):
-			yield self.__r_keytransform__(k), self.d[k]
+    #=====================================================================================
+    FOLER='./temp'
+    INT_PREFIX='__int__'
+    #=====================================================================================
+    def _open(self):
+        if not os.path.isdir(self.FOLER):
+            self.FOLER = './temp'
+        if not os.path.isdir(self.FOLER):
+            raise IOError('Cannot wirte at folder "%s"' % self.FOLER)
+        while (True):
+            self.filename = '%s/.%08d.__dict__' % (self.FOLER, randint(1,99999999))
+            if not os.path.exists(self.filename):
+                break
+        self.d = shelve.open(self.filename)
+    #=====================================================================================
+    def _close(self, is_delete=True):
+        if self.d is not None:
+            self.d.close()
+            self.d = None
+        if is_delete and os.path.exists(self.filename):
+            os.remove(self.filename)
+    #=====================================================================================
+    def __init__(self, d={}):
+        self.filename = None
+        self.d = None
+        self._open()
+        if d and not isinstance(d, (dict, pDict)):
+            raise ReferenceError('pDict construct need only dict or pDict type but <%s>'
+                % str(type(d)))
+        for k, v in d.items():
+            self.__setitem__(k, v)
+    #=====================================================================================
+    def __del__(self):
+        self._close()
+    #=====================================================================================
+    def __repr__(self):
+        rl = list()
+        rl.append('{')
+        for i,k in enumerate(sorted(self.d.keys())):
+            if i > 0: rl.append(',')
+            rk = self.__r_keytransform__(k)
+            if isinstance(rk, str):
+                rk = '"%s"' % rk
+            rv = self.d[k]
+            if isinstance(rv, str):
+                rv = '"%s"' % rv
+            rl.append('%s:%s'%(rk,rv))
+        rl.append('}')
+        return ''.join(rl)
+    #=====================================================================================
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            return [ self.d[self.__keytransform__(k)]
+                     for k in range(key.start, key.stop, key.step) ]
+        return self.d[self.__keytransform__(key)]
+    #=====================================================================================
+    def __setitem__(self, key, value):
+        self.d[self.__keytransform__(key)] = value
+    #=====================================================================================
+    def __delitem__(self, key):
+        r = self.d[self.__keytransform__(key)]
+        del self.d[self.__keytransform__(key)]
+        return r
+    #=====================================================================================
+    def __iter__(self):
+        return iter(self.d)
+    #=====================================================================================
+    def __len__(self):
+        return len(self.d)
+    #=====================================================================================
+    def __keytransform__(self, key):
+        if isinstance(key, str):
+            return key
+        if isinstance(key, (int, int)):
+            return '%s%10d' % (self.INT_PREFIX, key)
+        return str(key)
+    #=====================================================================================
+    def __r_keytransform__(self, key):
+        if key.startswith(self.INT_PREFIX):
+            return int(key[len(self.INT_PREFIX):].strip())
+        return key
+    #=====================================================================================
+    def __contains__(self, key):
+        # return self.__keytransform__(key) in self.d
+        return self.has_key(key)
+    #=====================================================================================
+    def has_key(self, key):
+        return self.d.has_key(self.__keytransform__(key))
+    #=====================================================================================
+    def keys(self):
+        # for k in self.d.keys():
+        #     yield self.__r_keytransform__(k)
+        return [ self.__r_keytransform__(k) for k in sorted(self.d.keys()) ]
+    #=====================================================================================
+    def values(self):
+        vl = list()
+        for k in sorted(self.d.keys()):
+            # yield self.d[k]
+            vl.append(self.d[k])
+        return vl
+    #=====================================================================================
+    def items(self):
+        for k in sorted(self.d.keys()):
+            yield self.__r_keytransform__(k), self.d[k]
 
 
 class pList(pDict):
-	#=====================================================================================
-	def __init__(self, l=[]):
-		pDict.__init__(self)
-		self.len = 0
-		if l and not isinstance(l, (list, pList)):
-			raise ReferenceError('pList construct need only list or pList type but <%s>'
-			                     % str(type(l)))
-		for v in l:
-			self.append(v)
-	#=====================================================================================
-	def __repr__(self):
-		rl = list()
-		rl.append('[')
-		for i in xrange(self.len):
-			if i > 0: rl.append(',')
-			rv = self.d[self.__keytransform__(i)]
-			if isinstance(rv, str):
-				rv = '"%s"' % rv
-			rl.append('%s'%rv)
-		rl.append(']')
-		return ''.join(rl)
-	#=====================================================================================
-	def __setitem__(self, ndx, value):
-		if ndx < 0 or ndx > self.len:
-			raise IndexError('Invalid index <%s>' % ndx)
-		self.d[self.__keytransform__(ndx)] = value
-	#=====================================================================================
-	def __delitem__(self, ndx):
-		if ndx < 0 or ndx >= self.len:
-			raise IndexError('Invalid index <%s>' % ndx)
-		r = self.d[self.__keytransform__(ndx)]
-		del self.d[self.__keytransform__(ndx)]
-		for i in range(ndx, self.len-1):
-			self.d[self.__keytransform__(i)] = self.d[self.__keytransform__(i+1)]
-		self.len -= 1
-		if self.len > 0:
-			del self.d[self.__keytransform__(self.len)]
-		return r
-	#=====================================================================================
-	def __contains__(self, v):
-		return v in self.values()
-	#=====================================================================================
-	def __iter__(self):
-		return iter(self.values())
-	#=====================================================================================
-	def append(self, v):
-		self.__setitem__(self.len, v)
-		self.len += 1
-	#=====================================================================================
-	def extend(self, l):
-		for item in l:
-			self.append(item)
-		self.len += len(l)
+    #=====================================================================================
+    def __init__(self, l=[]):
+        pDict.__init__(self)
+        self.len = 0
+        if l and not isinstance(l, (list, pList)):
+            raise ReferenceError('pList construct need only list or pList type but <%s>'
+                                 % str(type(l)))
+        for v in l:
+            self.append(v)
+    #=====================================================================================
+    def __repr__(self):
+        rl = list()
+        rl.append('[')
+        for i in xrange(self.len):
+            if i > 0: rl.append(',')
+            rv = self.d[self.__keytransform__(i)]
+            if isinstance(rv, str):
+                rv = '"%s"' % rv
+            rl.append('%s'%rv)
+        rl.append(']')
+        return ''.join(rl)
+    #=====================================================================================
+    def __setitem__(self, ndx, value):
+        if ndx < 0 or ndx > self.len:
+            raise IndexError('Invalid index <%s>' % ndx)
+        self.d[self.__keytransform__(ndx)] = value
+    #=====================================================================================
+    def __delitem__(self, ndx):
+        if ndx < 0 or ndx >= self.len:
+            raise IndexError('Invalid index <%s>' % ndx)
+        r = self.d[self.__keytransform__(ndx)]
+        del self.d[self.__keytransform__(ndx)]
+        for i in range(ndx, self.len-1):
+            self.d[self.__keytransform__(i)] = self.d[self.__keytransform__(i+1)]
+        self.len -= 1
+        if self.len > 0:
+            del self.d[self.__keytransform__(self.len)]
+        return r
+    #=====================================================================================
+    def __contains__(self, v):
+        return v in self.values()
+    #=====================================================================================
+    def __iter__(self):
+        return iter(self.values())
+    #=====================================================================================
+    def append(self, v):
+        self.__setitem__(self.len, v)
+        self.len += 1
+    #=====================================================================================
+    def extend(self, l):
+        for item in l:
+            self.append(item)
+        self.len += len(l)
+    #====================================================================================
 
 
-def dict2dict(d, kmer):
+
+def dict2array(d, kmer):
     kmer_list = pList()
     for i in itertools.product(['A', 'T', 'G', 'C', 'N'], repeat=kmer):
         kmer_list.append(''.join(i))
@@ -276,15 +278,21 @@ def dict2dict(d, kmer):
     for k1, v1 in d.items():
         d[k1] = sorted(v1.items())
     
-    final_data = pDict()
-    for k, v in d.items():
-        for mer, n in v:
-            if k not in final_data.keys(): final_data[k] = pList()
-            final_data[k].append(n)
+    #final_data = pDict()
+    #for k, v in d.items():
+    #    for mer, n in v:
+    #        if k not in final_data.keys(): final_data[k] = pList()
+    #        final_data[k].append(n)
     
+    final_data = pList()
+    names = []
+    for k, v in d.items():
+        final_data.append(list(v.values()))
+        names.append(str(k))
+
     del d
 
-    return final_data
+    return final_data, names
 
 
 def ploting(kmer):
@@ -292,10 +300,9 @@ def ploting(kmer):
         data = pDict(json.load(f))
 
     plt.figure(figsize=(30, 20))
-    data = dict2dict(data, kmer)
-    data = np.array(data)
-    linked = linkage(data.T, method='ward')
-    dend = dendrogram(linked, orientation='top', distance_sort='descending', labels=list(data.T.index), show_leaf_counts=True)
+    data, names = dict2array(data, kmer)
+    linked = linkage(data, method='ward')
+    dend = dendrogram(linked, orientation='top', distance_sort='descending', labels=names, show_leaf_counts=True)
 
     plt.savefig(f'{kmer}_analyzed.png')
 
@@ -315,12 +322,12 @@ def finalize():
 
 
 def analyze(args):
-    #pre_processing(args.genome)
-    #ltr_finding(args.threads)
-    #ltr_extract()
-    #kmer = int(args.kmer)
+    pre_processing(args.genome)
+    ltr_finding(args.threads)
+    ltr_extract()
+    kmer = int(args.kmer)
     #for k in [kmer-4, kmer-2, kmer]:
         #kmer_count(k)
         #ploting(k)
-    ploting(13)
+    ploting(kmer) # TEST for pList, pDict
     finalize()
