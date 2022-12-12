@@ -1,6 +1,6 @@
 //! # krust
 //!
-//! `krust` is a [k-mer](https://en.wikipedia.org/wiki/K-mer) counter
+//! `kalnal-kmer` is a [k-mer](https://en.wikipedia.org/wiki/K-mer) counter
 //! written in Rust and run from the command line that will output canonical
 //! k-mers and their frequency across the records in a fasta file.
 //!
