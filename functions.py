@@ -10,9 +10,11 @@ import json
 import itertools
 from scipy.cluster.hierarchy import dendrogram, linkage
 from matplotlib import pyplot as plt
+import numpy as np
 import copy
 import pandas as pd
-
+from pprint import pprint
+from tqdm import tqdm
 
 def ltr_finding(threads):
     try:
@@ -83,11 +85,11 @@ def kmer_count(kmer):
     except subprocess.CalledProcessError:
         print("Something went wrong with kalnal-kmer")
 
-    kmer_data = {}
+    kmer_data = pDict()
     file_list2 = [f for f in os.listdir('./temp') if f.endswith('.tsv')]
     for split_file in file_list2:
         with open(f'temp/{split_file}', 'r') as f:
-            if split_file.split("_")[0] not in kmer_data.keys(): kmer_data[split_file.split("_")[0]] = {}
+            if split_file.split("_")[0] not in kmer_data.keys(): kmer_data[split_file.split("_")[0]] = pDict()
             for line in f:
                 kmer_data[split_file.split("_")[0]][line.split('\t')[0].strip()] = line.split('\t')[1].strip()
 
@@ -222,7 +224,7 @@ class pList(pDict):
     def __repr__(self):
         rl = list()
         rl.append('[')
-        for i in xrange(self.len):
+        for i in range(self.len):
             if i > 0: rl.append(',')
             rv = self.d[self.__keytransform__(i)]
             if isinstance(rv, str):
@@ -270,28 +272,51 @@ def dict2array(d, kmer):
     kmer_list = pList()
     for i in itertools.product(['A', 'T', 'G', 'C', 'N'], repeat=kmer):
         kmer_list.append(''.join(i))
+    
+    print(len(kmer_list))
+    print("step1")
+    foo = copy.copy(d)
 
-    for k1, v1 in d.items():
+    for k1, v1 in foo.items():
         for mer in kmer_list:
-            if mer not in v1.keys(): d[k1][mer] = 0
+            print(mer)
+            if not d[k1].get(mer): d[k1][mer] = 0
+
+    for i, (k1, v1) in enumerate(d.items()):
+        if i == 0:
+            tmp = len(v1)
+        else:
+            try: 
+                assert tmp == len(v1)
+            except AssertionError:
+                print(f"{tmp} does not match with {len(v1)}")
+
+    print("step2")
 
     for k1, v1 in d.items():
         d[k1] = sorted(v1.items())
     
+    print("step3")
+
     #final_data = pDict()
     #for k, v in d.items():
     #    for mer, n in v:
     #        if k not in final_data.keys(): final_data[k] = pList()
     #        final_data[k].append(n)
-    
+   
+
     final_data = pList()
     names = []
     for k, v in d.items():
-        final_data.append(list(v.values()))
+        temp = []
+        for mer, n in v:
+            temp.append(int(n))
+        final_data.append(temp)
         names.append(str(k))
 
     del d
-
+    
+    print(np.shape(final_data))
     return final_data, names
 
 
@@ -322,12 +347,13 @@ def finalize():
 
 
 def analyze(args):
-    pre_processing(args.genome)
-    ltr_finding(args.threads)
-    ltr_extract()
+    #pre_processing(args.genome)
+    #ltr_finding(args.threads)
+    #ltr_extract()
     kmer = int(args.kmer)
     #for k in [kmer-4, kmer-2, kmer]:
         #kmer_count(k)
         #ploting(k)
+    kmer_count(kmer)
     ploting(kmer) # TEST for pList, pDict
     finalize()
