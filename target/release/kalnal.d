@@ -1,1 +1,1 @@
-/workspaces/kalnal/target/release/kalnal: /workspaces/kalnal/src/clustering.rs /workspaces/kalnal/src/config.rs /workspaces/kalnal/src/kmer.rs /workspaces/kalnal/src/lib.rs /workspaces/kalnal/src/main.rs /workspaces/kalnal/src/plotting.rs /workspaces/kalnal/src/startup.rs
+/workspaces/kalnal/target/release/kalnal: /workspaces/kalnal/src/lib.rs /workspaces/kalnal/src/main.rs

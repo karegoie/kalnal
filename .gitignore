@@ -2,3 +2,4 @@
 *fna*
 __pycache__/
 *.png
+target/
