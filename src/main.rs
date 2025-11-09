@@ -1,10 +1,9 @@
 use bio::io::fasta;
 use clap::Parser;
+use dbscan::Classification;
 use itertools::Itertools;
 use ndarray::{Array1, Array2};
-use rand::prelude::*;
-use rayon::prelude::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::process;
@@ -12,7 +11,7 @@ use std::process;
 /// CLI tool for clustering contigs based on k-mer spatial distribution
 #[derive(Parser, Debug)]
 #[command(name = "kalnal")]
-#[command(about = "Cluster contigs using k-mer interval histograms with bootstrap support", long_about = None)]
+#[command(about = "Cluster contigs using k-mer interval histograms and DBSCAN", long_about = None)]
 struct Args {
     /// K-mer length
     k: usize,
@@ -20,12 +19,22 @@ struct Args {
     /// Input FASTA file path
     fasta_file: String,
 
-    /// Output Newick file path
+    /// Output TSV file path
     output_file: String,
 
     /// Number of k-mers to sample
     #[arg(short = 'n', long = "n-kmers", default_value_t = 1000)]
     n_kmers: usize,
+
+    /// DBSCAN epsilon parameter (maximum distance for neighborhood)
+    /// If not specified, will be auto-detected as 2*D where D is dimensionality
+    #[arg(short = 'e', long = "eps")]
+    eps: Option<f64>,
+
+    /// DBSCAN minimum points parameter (minimum neighbors to form a cluster)
+    /// If not specified, will be auto-detected using k-NN elbow method
+    #[arg(short = 'm', long = "min-points")]
+    min_points: Option<usize>,
 }
 
 // Log-scale histogram bins (powers of 4, up to ~1G)
@@ -66,27 +75,24 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loaded {} contigs", contigs.len());
     
     // TWO-PASS STRATEGY
-    // PASS 1: scan FASTA to collect unique canonical k-mers (no positions)
-    eprintln!("Collecting unique canonical k-mers (k={})...", args.k);
+    // PASS 1: scan FASTA to count k-mer frequencies
+    eprintln!("Counting k-mer frequencies (k={})...", args.k);
     if args.k == 0 || args.k > 32 {
         return Err("k must be between 1 and 32 when packing into u64".into());
     }
-    let unique_kmers = collect_unique_kmers(&contigs, args.k);
-    eprintln!("Found {} unique canonical k-mers", unique_kmers.len());
-    if unique_kmers.is_empty() {
+    let kmer_counts = count_kmers(&contigs, args.k);
+    eprintln!("Found {} unique canonical k-mers", kmer_counts.len());
+    if kmer_counts.is_empty() {
         return Err("No valid k-mers found".into());
     }
 
-    // Sampling: choose n_kmers from unique set
-    let n_sample = args.n_kmers.min(unique_kmers.len());
-    eprintln!("Sampling {} k-mers from the unique set...", n_sample);
-    let mut rng = rand::rng();
-    let mut all_kmers_vec: Vec<u64> = unique_kmers.into_iter().collect();
-    let selected_kmers: Vec<u64> = all_kmers_vec
-        .as_mut_slice()
-        .choose_multiple(&mut rng, n_sample)
-        .cloned()
-        .collect();
+    // Select most frequent n_kmers
+    let n_sample = args.n_kmers.min(kmer_counts.len());
+    eprintln!("Selecting {} most frequent k-mers...", n_sample);
+    let selected_kmers = select_top_frequent_kmers(&kmer_counts, n_sample);
+    eprintln!("Selected k-mers with frequencies ranging from {} to {}", 
+        kmer_counts.get(&selected_kmers[selected_kmers.len()-1]).unwrap_or(&0),
+        kmer_counts.get(&selected_kmers[0]).unwrap_or(&0));
 
     eprintln!("Scanning FASTA and building position index for sampled k-mers...");
 
@@ -95,80 +101,76 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let kmer_index = build_kmer_position_index_sampled(&contigs, args.k, &sampled_set);
     eprintln!("Indexed positions for {} sampled k-mers", kmer_index.len());
 
-    eprintln!("Building tree for each sampled k-mer and collecting bipartitions...");
-    // STEP 3: Build trees using precomputed index (fast lookups)
-    let all_bipartitions: Vec<BTreeSet<BTreeSet<String>>> = selected_kmers
-        .par_iter()
-        .enumerate()
-        .map(|(_i, kmer_u64)| {
-
-            let histogram = calculate_interval_histogram_from_index_u64(
-                *kmer_u64,
-                &kmer_index,
-                contigs.len(),
-                BINS,
-            );
-
-            let dist_matrix = histogram_to_distance_matrix(&histogram, BINS.len() - 1);
-            println!("Distance matrix for k-mer {:016x}:\n{:?}", kmer_u64, dist_matrix);
-            let tree_newick = build_nj_tree_simple(&dist_matrix, &contig_ids);
-            parse_bipartitions_from_newick(&tree_newick, &contig_ids)
-        })
-        .collect();
-
-    eprintln!("Processed {} trees from k-mers", all_bipartitions.len());
-
-    // Bootstrap: resample k-mer trees with replacement
-    eprintln!("Running {} bootstrap replicates...", args.n_kmers);
+    eprintln!("Building cosine distance matrix from high-dimensional feature space...");
     
-    let bootstrap_bipartitions: Vec<BTreeSet<BTreeSet<String>>> = (0..args.n_kmers)
-        .into_par_iter()
-        .map(|_i| {
-            // Resample trees (k-mer trees) with replacement
-            let mut rng = rand::rng();
-            let resampled_indices: Vec<usize> = (0..n_sample)
-                .map(|_| rng.random_range(0..all_bipartitions.len()))
-                .collect();
-            
-            // Collect all bipartitions from resampled trees
-            let mut combined_bipartitions = BTreeSet::new();
-            for idx in resampled_indices {
-                for bipartition in &all_bipartitions[idx] {
-                    combined_bipartitions.insert(bipartition.clone());
-                }
-            }
-            
-            combined_bipartitions
-        })
-        .collect();
-
-    // Aggregate bootstrap counts
-    let mut bootstrap_counts: HashMap<BTreeSet<String>, usize> = HashMap::new();
-    for bipartitions in bootstrap_bipartitions {
-        for bipartition in bipartitions {
-            *bootstrap_counts.entry(bipartition).or_insert(0) += 1;
+    // Build cosine distance matrix from concatenated normalized histograms
+    let averaged_dist_matrix = build_cosine_distance_matrix(&selected_kmers, &kmer_index, contigs.len(), BINS);
+    
+    // Auto-detect DBSCAN parameters if not provided
+    let (eps, min_points) = if args.eps.is_none() || args.min_points.is_none() {
+        eprintln!("Auto-detecting DBSCAN parameters using k-NN method...");
+        let (auto_eps, auto_min_points) = auto_detect_dbscan_params(&averaged_dist_matrix);
+        let final_eps = args.eps.unwrap_or(auto_eps);
+        let final_min_points = args.min_points.unwrap_or(auto_min_points);
+        eprintln!("Auto-detected: eps={:.2}, min_points={}", auto_eps, auto_min_points);
+        if args.eps.is_some() {
+            eprintln!("Using user-provided eps={:.2}", final_eps);
         }
+        if args.min_points.is_some() {
+            eprintln!("Using user-provided min_points={}", final_min_points);
+        }
+        (final_eps, final_min_points)
+    } else {
+        (args.eps.unwrap(), args.min_points.unwrap())
+    };
+    
+    eprintln!("Running DBSCAN clustering (eps={:.2}, min_points={})...", eps, min_points);
+    
+    // Perform DBSCAN clustering
+    let clusters = perform_dbscan(&averaged_dist_matrix, eps, min_points);
+    
+    eprintln!("Clustering complete. Writing results to {}...", args.output_file);
+    
+    // Write results to TSV
+    let mut output = File::create(&args.output_file)?;
+    writeln!(output, "contig_id\tcluster_id")?;
+    
+    for (i, contig_id) in contig_ids.iter().enumerate() {
+        let cluster_label = match &clusters[i] {
+            Classification::Core(cluster_id) | Classification::Edge(cluster_id) => {
+                cluster_id.to_string()
+            }
+            Classification::Noise => "noise".to_string(),
+        };
+        writeln!(output, "{}\t{}", contig_id, cluster_label)?;
     }
 
-    eprintln!("Building consensus tree from all k-mer trees...");
-
-    // Build consensus tree: use the first sampled k-mer's histogram (from index)
-    let first_histogram = calculate_interval_histogram_from_index_u64(selected_kmers[0], &kmer_index, contigs.len(), BINS);
-    let first_dist_matrix = histogram_to_distance_matrix(&first_histogram, BINS.len() - 1);
-    let consensus_newick = build_nj_tree_simple(&first_dist_matrix, &contig_ids);
+    eprintln!("Success! Clustering results written to {}", args.output_file);
     
-    // Annotate with bootstrap support
-    let annotated_newick = annotate_newick_with_support(
-        &consensus_newick,
-        &bootstrap_counts,
-        args.n_kmers,
-        &contig_ids,
-    );
-
-    let mut output = File::create(&args.output_file)?;
-    writeln!(output, "{}", annotated_newick)?;
-
-    eprintln!("Success! Tree written to {}", args.output_file);
+    // Print summary
+    let mut cluster_counts: HashMap<String, usize> = HashMap::new();
+    for cluster in &clusters {
+        let label = match cluster {
+            Classification::Core(id) | Classification::Edge(id) => id.to_string(),
+            Classification::Noise => "noise".to_string(),
+        };
+        *cluster_counts.entry(label).or_insert(0) += 1;
+    }
+    
+    eprintln!("\nCluster summary:");
+    let mut sorted_clusters: Vec<_> = cluster_counts.iter().collect();
+    sorted_clusters.sort_by_key(|(label, _)| {
+        if label.as_str() == "noise" {
+            (usize::MAX, label.to_string())
+        } else {
+            (label.parse::<usize>().unwrap_or(usize::MAX), label.to_string())
+        }
+    });
+    
+    for (cluster_id, count) in sorted_clusters {
+        eprintln!("  Cluster {}: {} contigs", cluster_id, count);
+    }
+    
     Ok(())
 }
 
@@ -228,17 +230,50 @@ fn canonical_kmer_u64(window: &[u8]) -> Option<u64> {
     Some(std::cmp::min(fwd, rc))
 }
 
-/// PASS 1: collect unique canonical k-mers (packed u64)
-fn collect_unique_kmers(contigs: &[(String, Vec<u8>)], k: usize) -> HashSet<u64> {
-    let mut set: HashSet<u64> = HashSet::new();
+/// PASS 1: count k-mer frequencies (packed u64)
+fn count_kmers(contigs: &[(String, Vec<u8>)], k: usize) -> HashMap<u64, usize> {
+    let mut counts: HashMap<u64, usize> = HashMap::new();
     for (_id, seq) in contigs.iter() {
         for window in seq.windows(k) {
             if let Some(key) = canonical_kmer_u64(window) {
-                set.insert(key);
+                *counts.entry(key).or_insert(0) += 1;
             }
         }
     }
-    set
+    counts
+}
+
+/// Select top n k-mers from Q2-Q3 (50%-75%) frequency range
+fn select_top_frequent_kmers(kmer_counts: &HashMap<u64, usize>, n: usize) -> Vec<u64> {
+    // Collect all frequency values
+    let mut counts: Vec<usize> = kmer_counts.values().copied().collect();
+    
+    if counts.is_empty() {
+        return Vec::new();
+    }
+    
+    // Sort frequencies
+    counts.sort_unstable();
+
+    // Calculate Q1 (25th percentile, median) and Q3 (75th percentile)
+    let q1_idx = ((counts.len() as f64) * 0.25) as usize;
+    let q3_idx = ((counts.len() as f64) * 0.75) as usize;
+
+    let q1_freq = counts.get(q1_idx).copied().unwrap_or(0);
+    let q3_freq = counts.get(q3_idx).copied().unwrap_or(usize::MAX);
+    
+    // Filter k-mers in Q2-Q3 range
+    let mut filtered_kmers: Vec<(u64, usize)> = kmer_counts
+        .iter()
+        .filter(|(_, count)| **count >= q1_freq && **count <= q3_freq)
+        .map(|(&kmer, &count)| (kmer, count))
+        .collect();
+    
+    // Sort by frequency descending
+    filtered_kmers.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    // Take top n without random sampling
+    filtered_kmers.into_iter().take(n).map(|(kmer, _)| kmer).collect()
 }
 
 /// PASS 2: build k-mer position index only for sampled k-mers
@@ -267,6 +302,7 @@ fn build_kmer_position_index_sampled(
 }
 
 /// Calculate interval histogram using precomputed k-mer position index (packed u64 keys)
+/// Returns L1-normalized histogram per contig
 fn calculate_interval_histogram_from_index_u64(
     kmer_u64: u64,
     kmer_index: &HashMap<u64, Vec<(u32, u32)>>,
@@ -303,23 +339,84 @@ fn calculate_interval_histogram_from_index_u64(
         }
     }
 
+    // L1 normalization per contig
+    for contig_idx in 0..n_contigs {
+        let start = contig_idx * n_bins;
+        let end = (contig_idx + 1) * n_bins;
+        
+        // Calculate sum for this contig's histogram
+        let sum: f64 = histogram.slice(ndarray::s![start..end]).sum();
+        
+        // Normalize if sum > 0
+        if sum > 0.0 {
+            let mut slice = histogram.slice_mut(ndarray::s![start..end]);
+            slice /= sum;
+        }
+    }
+
     histogram
 }
 
-/// Convert histogram to distance matrix between contigs
-fn histogram_to_distance_matrix(histogram: &Array1<f64>, n_bins: usize) -> Array2<f64> {
-    let n_contigs = histogram.len() / n_bins;
+/// Build cosine distance matrix from high-dimensional feature matrix
+/// Concatenates normalized histograms from all selected k-mers into a single feature space
+fn build_cosine_distance_matrix(
+    selected_kmers: &[u64],
+    kmer_index: &HashMap<u64, Vec<(u32, u32)>>,
+    n_contigs: usize,
+    bins: &[usize],
+) -> Array2<f64> {
+    let n_bins = bins.len() - 1;
+    let n_features = selected_kmers.len() * n_bins;
+    
+    // Create high-dimensional feature matrix (n_contigs x n_features)
+    let mut feature_matrix = Array2::<f64>::zeros((n_contigs, n_features));
+    
+    // Fill feature matrix with normalized histograms from each k-mer
+    for (k_idx, &kmer_u64) in selected_kmers.iter().enumerate() {
+        // Get normalized histogram for this k-mer
+        let norm_hist = calculate_interval_histogram_from_index_u64(
+            kmer_u64,
+            kmer_index,
+            n_contigs,
+            bins,
+        );
+        
+        // Copy each contig's histogram slice into feature matrix
+        for contig_idx in 0..n_contigs {
+            let hist_start = contig_idx * n_bins;
+            let hist_end = (contig_idx + 1) * n_bins;
+            let feat_start = k_idx * n_bins;
+            let feat_end = (k_idx + 1) * n_bins;
+            
+            let hist_slice = norm_hist.slice(ndarray::s![hist_start..hist_end]);
+            let mut feat_slice = feature_matrix.slice_mut(ndarray::s![contig_idx, feat_start..feat_end]);
+            feat_slice.assign(&hist_slice);
+        }
+    }
+    
+    // Build cosine distance matrix
     let mut dist_matrix = Array2::<f64>::zeros((n_contigs, n_contigs));
     
     for i in 0..n_contigs {
         for j in (i + 1)..n_contigs {
-            let mut dist = 0.0;
-            for bin_idx in 0..n_bins {
-                let val_i = histogram[i * n_bins + bin_idx];
-                let val_j = histogram[j * n_bins + bin_idx];
-                dist += (val_i - val_j).powi(2);
-            }
-            dist = dist.sqrt();
+            let vec_i = feature_matrix.row(i);
+            let vec_j = feature_matrix.row(j);
+            
+            // Calculate cosine similarity
+            let dot_product = vec_i.dot(&vec_j);
+            let norm_i = vec_i.dot(&vec_i).sqrt();
+            let norm_j = vec_j.dot(&vec_j).sqrt();
+            let denominator = norm_i * norm_j;
+            
+            let sim = if denominator.abs() < f64::EPSILON {
+                0.0
+            } else {
+                dot_product / denominator
+            };
+            
+            // Cosine distance = 1 - cosine similarity
+            let dist = 1.0 - sim;
+            
             dist_matrix[[i, j]] = dist;
             dist_matrix[[j, i]] = dist;
         }
@@ -328,241 +425,181 @@ fn histogram_to_distance_matrix(histogram: &Array1<f64>, n_bins: usize) -> Array
     dist_matrix
 }
 
-/// Build NJ tree from distance matrix using simple UPGMA
-fn build_nj_tree_simple(dist_matrix: &Array2<f64>, labels: &[String]) -> String {
+/// Auto-detect DBSCAN parameters using k-NN distance analysis
+/// Returns (eps, min_points) where:
+/// - eps is determined from k-distance graph knee detection only
+/// - min_points is optimized using elbow method
+fn auto_detect_dbscan_params(dist_matrix: &Array2<f64>) -> (f64, usize) {
     let n = dist_matrix.nrows();
     
-    if n < 2 {
-        return format!("{};", labels[0]);
-    }
+    // Calculate k-NN distances for each point
+    let mut knn_distances: Vec<Vec<f64>> = Vec::new();
     
-    if n == 2 {
-        let dist = dist_matrix[[0, 1]];
-        return format!("({}:{},{}:{});", labels[0], dist / 2.0, labels[1], dist / 2.0);
-    }
-    
-    // Simple UPGMA clustering
-    let mut clusters: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
-    let mut distances = dist_matrix.clone();
-    let mut active: Vec<bool> = vec![true; n];
-    
-    while clusters.iter().filter(|_| true).count() > 1 {
-        // Find minimum distance pair
-        let mut min_dist = f64::INFINITY;
-        let mut min_i = 0;
-        let mut min_j = 1;
-        
-        for i in 0..n {
-            if !active[i] {
-                continue;
-            }
-            for j in (i + 1)..n {
-                if !active[j] {
-                    continue;
-                }
-                if distances[[i, j]] < min_dist {
-                    min_dist = distances[[i, j]];
-                    min_i = i;
-                    min_j = j;
-                }
-            }
-        }
-        
-        // Merge clusters
-        let new_cluster = format!("({}:{},{}:{})", 
-            clusters[min_i], min_dist / 2.0,
-            clusters[min_j], min_dist / 2.0);
-        
-        // Update distance matrix (UPGMA: average distance)
-        for k in 0..n {
-            if !active[k] || k == min_i || k == min_j {
-                continue;
-            }
-            let new_dist = (distances[[min_i, k]] + distances[[min_j, k]]) / 2.0;
-            distances[[min_i, k]] = new_dist;
-            distances[[k, min_i]] = new_dist;
-        }
-        
-        clusters[min_i] = new_cluster;
-        active[min_j] = false;
-        
-        // Check if only one cluster remains
-        let active_count = active.iter().filter(|&&a| a).count();
-        if active_count == 1 {
-            break;
-        }
-    }
-    
-    // Find the last active cluster
     for i in 0..n {
-        if active[i] {
-            return format!("{};", clusters[i]);
+        let mut distances: Vec<f64> = Vec::new();
+        for j in 0..n {
+            if i != j {
+                distances.push(dist_matrix[[i, j]]);
+            }
+        }
+        distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        knn_distances.push(distances);
+    }
+    
+    // Step 1: Determine optimal k for min_points using elbow method
+    let max_k = n - 1;
+    
+    // Calculate average k-NN distance for each k
+    let mut avg_knn_dist: Vec<f64> = Vec::new();
+    for k in 1..=max_k {
+        let sum: f64 = knn_distances.iter()
+            .map(|dists| if k-1 < dists.len() { dists[k-1] } else { 0.0 })
+            .sum();
+        avg_knn_dist.push(sum / n as f64);
+    }
+    
+    // Find elbow point using rate of change
+    let elbow_k = find_elbow_point(&avg_knn_dist);
+    let min_points = elbow_k;
+    
+    eprintln!("  k-NN elbow point detected at k={}", elbow_k);
+    eprintln!("  Using elbow-based min_points: {}", min_points);
+    
+    // Step 2: Determine eps using k-distance graph knee detection
+    // For eps, we use the k-distance where k = min_points
+    let k_for_eps = min_points.min(max_k);
+    
+    // Get k-distances (k-th nearest neighbor distance) for all points
+    let mut k_distances: Vec<f64> = knn_distances.iter()
+        .filter_map(|dists| {
+            if k_for_eps - 1 < dists.len() {
+                Some(dists[k_for_eps - 1])
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    k_distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    
+    if k_distances.is_empty() {
+        eprintln!("  Warning: No valid k-distances found, using fallback eps=0.1");
+        return (0.1, min_points);
+    }
+    
+    // Find knee point in sorted k-distances using maximum distance method
+    let eps = find_knee_in_sorted_distances(&k_distances);
+    
+    eprintln!("  k-distance knee point (k={}): {:.2}", k_for_eps, eps);
+    eprintln!("  Selected eps={:.2}, min_points={}", eps, min_points);
+    
+    (eps, min_points)
+}
+
+/// Find knee point in sorted k-distances using maximum distance from line method
+fn find_knee_in_sorted_distances(sorted_distances: &[f64]) -> f64 {
+    if sorted_distances.len() < 3 {
+        return sorted_distances.last().copied().unwrap_or(1.0);
+    }
+    
+    let n = sorted_distances.len();
+    
+    // Normalize coordinates
+    let x_start = 0.0;
+    let y_start = sorted_distances[0];
+    let x_end = (n - 1) as f64;
+    let y_end = sorted_distances[n - 1];
+    
+    // If all distances are the same, return that value
+    if (y_end - y_start).abs() < 1e-10 {
+        return y_start;
+    }
+    
+    // Calculate perpendicular distance from each point to the line
+    // Line equation: (y_end - y_start) * x - (x_end - x_start) * y + (x_end * y_start - x_start * y_end) = 0
+    let a = y_end - y_start;
+    let b = -(x_end - x_start);
+    let c = x_end * y_start - x_start * y_end;
+    let norm = (a * a + b * b).sqrt();
+    
+    let mut max_distance = 0.0;
+    let mut knee_idx = n - 1;
+    
+    for i in 0..n {
+        let x = i as f64;
+        let y = sorted_distances[i];
+        
+        // Perpendicular distance from point (x, y) to line
+        let distance = (a * x + b * y + c).abs() / norm;
+        
+        if distance > max_distance {
+            max_distance = distance;
+            knee_idx = i;
         }
     }
     
-    // Fallback
-    format!("({});", labels.join(","))
+    sorted_distances[knee_idx]
 }
 
-/// Parse bipartitions from Newick string
-fn parse_bipartitions_from_newick(newick: &str, all_labels: &[String]) -> BTreeSet<BTreeSet<String>> {
-    let mut bipartitions = BTreeSet::new();
+/// Find elbow point in a curve using maximum curvature
+fn find_elbow_point(values: &[f64]) -> usize {
+    if values.len() < 3 {
+        return values.len();
+    }
     
-    // Simple parser: find all groups in parentheses
-    let mut stack: Vec<BTreeSet<String>> = Vec::new();
-    let mut current_label = String::new();
+    // Normalize values to [0, 1] range
+    let min_val = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_val = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let range = max_val - min_val;
     
-    for ch in newick.chars() {
-        match ch {
-            '(' => {
-                stack.push(BTreeSet::new());
-            }
-            ',' => {
-                if !current_label.is_empty() {
-                    let label = clean_label(&current_label);
-                    if !label.is_empty() {
-                        if let Some(set) = stack.last_mut() {
-                            set.insert(label);
-                        }
-                    }
-                    current_label.clear();
-                }
-            }
-            ')' => {
-                if !current_label.is_empty() {
-                    let label = clean_label(&current_label);
-                    if !label.is_empty() {
-                        if let Some(set) = stack.last_mut() {
-                            set.insert(label);
-                        }
-                    }
-                    current_label.clear();
-                }
-                
-                if let Some(clade) = stack.pop() {
-                    if !clade.is_empty() && clade.len() < all_labels.len() {
-                        bipartitions.insert(clade.clone());
-                    }
-                    
-                    // Add to parent
-                    if let Some(parent) = stack.last_mut() {
-                        parent.extend(clade);
-                    }
-                }
-            }
-            ':' | ';' => {
-                if !current_label.is_empty() {
-                    let label = clean_label(&current_label);
-                    if !label.is_empty() {
-                        if let Some(set) = stack.last_mut() {
-                            set.insert(label);
-                        }
-                    }
-                    current_label.clear();
-                }
-                // Skip until next important character
-            }
-            _ => {
-                if ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
-                    current_label.push(ch);
-                }
-            }
+    if range < 1e-10 {
+        return values.len();
+    }
+    
+    let normalized: Vec<f64> = values.iter()
+        .map(|v| (v - min_val) / range)
+        .collect();
+    
+    // Calculate curvature at each point using discrete approximation
+    // Curvature = |y''| / (1 + y'^2)^(3/2)
+    let mut max_curvature = 0.0;
+    let mut elbow_idx = 1;
+    
+    for i in 1..(normalized.len() - 1) {
+        // First derivative (finite difference)
+        let dy1 = normalized[i] - normalized[i - 1];
+        let dy2 = normalized[i + 1] - normalized[i];
+        
+        // Second derivative
+        let d2y = dy2 - dy1;
+        
+        // Approximate curvature
+        let curvature = d2y.abs();
+        
+        if curvature > max_curvature {
+            max_curvature = curvature;
+            elbow_idx = i;
         }
     }
     
-    bipartitions
+    // Return k value (1-indexed)
+    elbow_idx + 1
 }
 
-fn clean_label(label: &str) -> String {
-    label.split(':').next().unwrap_or(label).trim().to_string()
-}
-
-/// Annotate Newick string with bootstrap support values
-fn annotate_newick_with_support(
-    newick: &str,
-    bootstrap_counts: &HashMap<BTreeSet<String>, usize>,
-    n_replicates: usize,
-    all_labels: &[String],
-) -> String {
-    let mut result = String::new();
-    let mut _depth = 0;
-    let mut current_clade: Vec<BTreeSet<String>> = Vec::new();
-    let mut label_buffer = String::new();
+/// Perform DBSCAN clustering on distance matrix
+fn perform_dbscan(dist_matrix: &Array2<f64>, eps: f64, min_points: usize) -> Vec<Classification> {
+    let n = dist_matrix.nrows();
     
-    for ch in newick.chars() {
-        match ch {
-            '(' => {
-                if !label_buffer.is_empty() {
-                    result.push_str(&label_buffer);
-                    label_buffer.clear();
-                }
-                result.push(ch);
-                _depth += 1;
-                current_clade.push(BTreeSet::new());
-            }
-            ')' => {
-                if !label_buffer.is_empty() {
-                    result.push_str(&label_buffer);
-                    label_buffer.clear();
-                }
-                
-                result.push(ch);
-                
-                if let Some(clade) = current_clade.pop() {
-                    if !clade.is_empty() && clade.len() > 1 && clade.len() < all_labels.len() {
-                        let count = bootstrap_counts.get(&clade).copied().unwrap_or(0);
-                        let support = (count as f64 * 100.0 / n_replicates as f64).round() as usize;
-                        result.push_str(&format!("{}", support));
-                    }
-                    
-                    if let Some(parent) = current_clade.last_mut() {
-                        parent.extend(clade);
-                    }
-                }
-                
-                _depth -= 1;
-            }
-            ',' => {
-                if !label_buffer.is_empty() {
-                    result.push_str(&label_buffer);
-                    label_buffer.clear();
-                }
-                result.push(ch);
-            }
-            ':' => {
-                if !label_buffer.is_empty() {
-                    if let Some(set) = current_clade.last_mut() {
-                        set.insert(clean_label(&label_buffer));
-                    }
-                    result.push_str(&label_buffer);
-                    label_buffer.clear();
-                }
-                result.push(ch);
-            }
-            ';' => {
-                if !label_buffer.is_empty() {
-                    result.push_str(&label_buffer);
-                    label_buffer.clear();
-                }
-                result.push(ch);
-            }
-            _ => {
-                if ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' || ch == '+' || ch == 'e' || ch == 'E' {
-                    label_buffer.push(ch);
-                } else if !ch.is_whitespace() {
-                    if !label_buffer.is_empty() {
-                        result.push_str(&label_buffer);
-                        label_buffer.clear();
-                    }
-                    result.push(ch);
-                }
-            }
+    // Convert distance matrix to feature vectors (each row as a point)
+    let mut points: Vec<Vec<f64>> = Vec::new();
+    for i in 0..n {
+        let mut row = Vec::new();
+        for j in 0..n {
+            row.push(dist_matrix[[i, j]]);
         }
-    }
-
-    if !label_buffer.is_empty() {
-        result.push_str(&label_buffer);
+        points.push(row);
     }
     
-    result
+    let model = dbscan::Model::new(eps, min_points);
+    model.run(&points)
 }

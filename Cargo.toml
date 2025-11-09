@@ -10,5 +10,5 @@ clap = { version = "4.5", features = ["derive"] }
 bio = "3.0"
 ndarray = "0.17"
 itertools = "0.14"
-rand = "0.9"
 rayon = "1.9"
+dbscan = "0.3"
