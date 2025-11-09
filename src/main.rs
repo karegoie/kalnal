@@ -4,7 +4,7 @@ use itertools::Itertools;
 use ndarray::{Array1, Array2};
 use rand::prelude::*;
 use rayon::prelude::*;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::process;
@@ -26,6 +26,9 @@ struct Args {
     /// Number of k-mers to sample (also used as bootstrap replicates)
     #[arg(short = 'n', long = "n-kmers", default_value_t = 1000)]
     n_kmers: usize,
+    /// Maximum positions to store per k-mer (safety cutoff to avoid memory explosion)
+    #[arg(long = "max-kmer-freq", default_value_t = 100000)]
+    max_kmer_freq: usize,
 }
 
 // Log-scale histogram bins (powers of 2)
@@ -62,52 +65,55 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("Loaded {} contigs", contigs.len());
     
-    // STEP 1: Build k-mer position index (scan once)
-    eprintln!("Building k-mer position index (k={})...", args.k);
-    let kmer_index = build_kmer_position_index(&contigs, args.k);
-    eprintln!("Indexed {} unique k-mers", kmer_index.len());
-
-    if kmer_index.is_empty() {
+    // TWO-PASS STRATEGY
+    // PASS 1: scan FASTA to collect unique canonical k-mers (no positions)
+    eprintln!("PASS 1: collecting unique canonical k-mers (k={})...", args.k);
+    if args.k == 0 || args.k > 32 {
+        return Err("k must be between 1 and 32 when packing into u64".into());
+    }
+    let unique_kmers = collect_unique_kmers(&contigs, args.k);
+    eprintln!("Found {} unique canonical k-mers", unique_kmers.len());
+    if unique_kmers.is_empty() {
         return Err("No valid k-mers found".into());
     }
 
-    // STEP 2: Sample k-mers
-    let n_sample = args.n_kmers.min(kmer_index.len());
-    eprintln!("Randomly sampling {} k-mers...", n_sample);
-
+    // Sampling: choose n_kmers from unique set
+    let n_sample = args.n_kmers.min(unique_kmers.len());
+    eprintln!("Sampling {} k-mers from the unique set...", n_sample);
     let mut rng = thread_rng();
-    let all_kmers: Vec<Vec<u8>> = kmer_index.keys().cloned().collect();
-    let selected_kmers: Vec<Vec<u8>> = all_kmers
+    let mut all_kmers_vec: Vec<u64> = unique_kmers.into_iter().collect();
+    let selected_kmers: Vec<u64> = all_kmers_vec
+        .as_mut_slice()
         .choose_multiple(&mut rng, n_sample)
         .cloned()
         .collect();
 
-    eprintln!("Building tree for each k-mer and collecting bipartitions...");
-    
+    eprintln!("PASS 2: scanning FASTA and building position index for sampled k-mers (max per k-mer={})...", args.max_kmer_freq);
+
+    // PASS 2: scan FASTA again and only record positions for sampled k-mers
+    let sampled_set: HashSet<u64> = selected_kmers.iter().copied().collect();
+    let kmer_index = build_kmer_position_index_sampled(&contigs, args.k, &sampled_set, args.max_kmer_freq);
+    eprintln!("Indexed positions for {} sampled k-mers", kmer_index.len());
+
+    eprintln!("Building tree for each sampled k-mer and collecting bipartitions...");
     // STEP 3: Build trees using precomputed index (fast lookups)
     let all_bipartitions: Vec<BTreeSet<BTreeSet<String>>> = selected_kmers
         .par_iter()
         .enumerate()
-        .map(|(i, kmer)| {
+        .map(|(i, kmer_u64)| {
             if i % 100 == 0 && i > 0 {
                 eprintln!("  Processed {}/{} k-mers", i, n_sample);
             }
-            
-            // Fast lookup from index (no file scanning!)
-            let histogram = calculate_interval_histogram_from_index(
-                kmer, 
-                &kmer_index, 
-                contigs.len(), 
-                BINS
+
+            let histogram = calculate_interval_histogram_from_index_u64(
+                *kmer_u64,
+                &kmer_index,
+                contigs.len(),
+                BINS,
             );
-            
-            // Build distance matrix from this single k-mer's histogram
+
             let dist_matrix = histogram_to_distance_matrix(&histogram, BINS.len() - 1);
-            
-            // Build tree from distance matrix
             let tree_newick = build_nj_tree_simple(&dist_matrix, &contig_ids);
-            
-            // Parse and extract bipartitions
             parse_bipartitions_from_newick(&tree_newick, &contig_ids)
         })
         .collect();
@@ -151,9 +157,9 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     eprintln!("Building consensus tree from all k-mer trees...");
-    
-    // Build consensus tree: use the first k-mer's tree structure and annotate with support
-    let first_histogram = calculate_interval_histogram(&selected_kmers[0], &contigs, BINS);
+
+    // Build consensus tree: use the first sampled k-mer's histogram (from index)
+    let first_histogram = calculate_interval_histogram_from_index_u64(selected_kmers[0], &kmer_index, contigs.len(), BINS);
     let first_dist_matrix = histogram_to_distance_matrix(&first_histogram, BINS.len() - 1);
     let consensus_newick = build_nj_tree_simple(&first_dist_matrix, &contig_ids);
     
@@ -172,59 +178,140 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Build k-mer position index: scan genome once and record all k-mer positions
-/// Returns: HashMap<Kmer, Vec<(ContigIndex, Position)>>
-fn build_kmer_position_index(
-    contigs: &[(String, Vec<u8>)],
-    k: usize,
-) -> HashMap<Vec<u8>, Vec<(usize, usize)>> {
-    let mut index: HashMap<Vec<u8>, Vec<(usize, usize)>> = HashMap::new();
-    
-    for (contig_idx, (_id, seq)) in contigs.iter().enumerate() {
-        for (pos, window) in seq.windows(k).enumerate() {
-            // Skip k-mers containing N
-            if window.iter().any(|&b| b == b'N' || b == b'n') {
-                continue;
+/// Pack a k-mer window into a canonical u64 (2 bits per base). Returns None if contains N or k>32.
+fn canonical_kmer_u64(window: &[u8]) -> Option<u64> {
+    // Map A/ a -> 0, C -> 1, G -> 2, T -> 3
+    let k = window.len();
+    if k == 0 || k > 32 {
+        return None;
+    }
+
+    let mut fwd: u64 = 0;
+    let mut rev: u64 = 0;
+    for &b in window.iter() {
+        let v = match b {
+            b'A' | b'a' => 0u64,
+            b'C' | b'c' => 1u64,
+            b'G' | b'g' => 2u64,
+            b'T' | b't' => 3u64,
+            _ => return None,
+        };
+        fwd = (fwd << 2) | v;
+        // For reverse complement, insert complement at low bits
+        let cv = match v {
+            0 => 3u64, // A -> T
+            1 => 2u64, // C -> G
+            2 => 1u64, // G -> C
+            3 => 0u64, // T -> A
+            _ => unreachable!(),
+        };
+        rev = rev | (cv << (2 * (window.len() - 1)));
+        // shift existing rev right by 2 for next iteration
+        // but we build differently: we'll construct rev by shifting existing bits right
+        // Simpler: compute rev by iterating reversed below instead
+    }
+
+    // build reverse complement properly
+    let mut rc: u64 = 0;
+    for &b in window.iter().rev() {
+        let v = match b {
+            b'A' | b'a' => 0u64,
+            b'C' | b'c' => 1u64,
+            b'G' | b'g' => 2u64,
+            b'T' | b't' => 3u64,
+            _ => return None,
+        };
+        let cv = match v {
+            0 => 3u64,
+            1 => 2u64,
+            2 => 1u64,
+            3 => 0u64,
+            _ => unreachable!(),
+        };
+        rc = (rc << 2) | cv;
+    }
+
+    Some(std::cmp::min(fwd, rc))
+}
+
+/// PASS 1: collect unique canonical k-mers (packed u64)
+fn collect_unique_kmers(contigs: &[(String, Vec<u8>)], k: usize) -> HashSet<u64> {
+    let mut set: HashSet<u64> = HashSet::new();
+    for (_id, seq) in contigs.iter() {
+        for window in seq.windows(k) {
+            if let Some(key) = canonical_kmer_u64(window) {
+                set.insert(key);
             }
-            
-            let canonical = canonical_kmer(window);
-            index.entry(canonical).or_insert_with(Vec::new).push((contig_idx, pos));
         }
     }
-    
+    set
+}
+
+/// PASS 2: build k-mer position index only for sampled k-mers
+/// Returns: HashMap<packed_kmer_u64, Vec<(contig_idx as u32, pos as u32)>>
+fn build_kmer_position_index_sampled(
+    contigs: &[(String, Vec<u8>)],
+    k: usize,
+    sampled: &HashSet<u64>,
+    max_freq: usize,
+) -> HashMap<u64, Vec<(u32, u32)>> {
+    let mut index: HashMap<u64, Vec<(u32, u32)>> = HashMap::new();
+    let mut saturated: HashSet<u64> = HashSet::new();
+
+    for (contig_idx, (_id, seq)) in contigs.iter().enumerate() {
+        for (pos, window) in seq.windows(k).enumerate() {
+            if let Some(key) = canonical_kmer_u64(window) {
+                if saturated.contains(&key) {
+                    continue;
+                }
+                if !sampled.contains(&key) {
+                    continue;
+                }
+
+                let entry = index.entry(key).or_insert_with(Vec::new);
+                if entry.len() >= max_freq {
+                    // mark saturated and drop further additions
+                    saturated.insert(key);
+                    // optionally free memory or shrink
+                    continue;
+                }
+                entry.push((contig_idx as u32, pos as u32));
+                if entry.len() >= max_freq {
+                    saturated.insert(key);
+                }
+            }
+        }
+    }
+
     index
 }
 
-/// Calculate interval histogram using precomputed k-mer position index (fast lookup!)
-fn calculate_interval_histogram_from_index(
-    kmer: &[u8],
-    kmer_index: &HashMap<Vec<u8>, Vec<(usize, usize)>>,
+/// Calculate interval histogram using precomputed k-mer position index (packed u64 keys)
+fn calculate_interval_histogram_from_index_u64(
+    kmer_u64: u64,
+    kmer_index: &HashMap<u64, Vec<(u32, u32)>>,
     n_contigs: usize,
     bins: &[usize],
 ) -> Array1<f64> {
     let n_bins = bins.len() - 1;
     let mut histogram = Array1::<f64>::zeros(n_contigs * n_bins);
-    
-    // Fast lookup from index
-    if let Some(positions) = kmer_index.get(kmer) {
-        // Group positions by contig
+
+    if let Some(positions) = kmer_index.get(&kmer_u64) {
         let mut contig_positions: HashMap<usize, Vec<usize>> = HashMap::new();
-        for &(contig_idx, pos) in positions {
+        for &(contig_idx_u32, pos_u32) in positions {
+            let contig_idx = contig_idx_u32 as usize;
+            let pos = pos_u32 as usize;
             contig_positions.entry(contig_idx).or_insert_with(Vec::new).push(pos);
         }
-        
-        // Calculate intervals for each contig
+
         for (contig_idx, mut pos_list) in contig_positions {
             pos_list.sort_unstable();
-            
-            // Calculate intervals between consecutive positions
             let intervals: Vec<usize> = pos_list
                 .iter()
                 .tuple_windows()
                 .map(|(a, b)| b - a)
                 .collect();
-            
-            // Bin the intervals
+
             for interval in intervals {
                 for bin_idx in 0..n_bins {
                     if interval >= bins[bin_idx] && interval < bins[bin_idx + 1] {
@@ -233,79 +320,6 @@ fn calculate_interval_histogram_from_index(
                     }
                 }
             }
-        }
-    }
-    
-    histogram
-}
-
-/// Get canonical k-mer (lexicographically smaller of k-mer and reverse complement)
-fn canonical_kmer(kmer: &[u8]) -> Vec<u8> {
-    let rc = reverse_complement(kmer);
-    if rc < kmer.to_vec() {
-        rc
-    } else {
-        kmer.to_vec()
-    }
-}
-
-/// Calculate reverse complement of a DNA sequence
-fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter()
-        .rev()
-        .map(|&b| match b {
-            b'A' | b'a' => b'T',
-            b'T' | b't' => b'A',
-            b'C' | b'c' => b'G',
-            b'G' | b'g' => b'C',
-            _ => b'N',
-        })
-        .collect()
-}
-
-/// Calculate interval histogram for a k-mer across all contigs
-fn calculate_interval_histogram(
-    kmer: &[u8],
-    contigs: &[(String, Vec<u8>)],
-    bins: &[usize],
-) -> Array1<f64> {
-    let n_bins = bins.len() - 1;
-    let n_contigs = contigs.len();
-    let mut histogram = Array1::<f64>::zeros(n_contigs * n_bins);
-
-    for (contig_idx, (_id, seq)) in contigs.iter().enumerate() {
-        // Find all positions of this k-mer in this contig
-        let positions: Vec<usize> = seq
-            .windows(kmer.len())
-            .enumerate()
-            .filter(|(_pos, window)| {
-                let window_canonical = canonical_kmer(window);
-                window_canonical == kmer
-            })
-            .map(|(pos, _)| pos)
-            .collect();
-
-        // Calculate intervals between consecutive positions
-        let intervals: Vec<usize> = positions
-            .iter()
-            .tuple_windows()
-            .map(|(a, b)| b - a)
-            .collect();
-
-        // Bin the intervals
-        let mut contig_hist = vec![0.0; n_bins];
-        for interval in intervals {
-            for bin_idx in 0..n_bins {
-                if interval >= bins[bin_idx] && interval < bins[bin_idx + 1] {
-                    contig_hist[bin_idx] += 1.0;
-                    break;
-                }
-            }
-        }
-
-        // Place into the full histogram
-        for bin_idx in 0..n_bins {
-            histogram[contig_idx * n_bins + bin_idx] = contig_hist[bin_idx];
         }
     }
 
