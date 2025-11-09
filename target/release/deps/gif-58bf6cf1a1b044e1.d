@@ -1,0 +1,13 @@
+/workspaces/kalnal/target/release/deps/gif-58bf6cf1a1b044e1.d: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/traits.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/common.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/mod.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/decoder.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/encoder.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/../README.md
+
+/workspaces/kalnal/target/release/deps/libgif-58bf6cf1a1b044e1.rlib: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/traits.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/common.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/mod.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/decoder.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/encoder.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/../README.md
+
+/workspaces/kalnal/target/release/deps/libgif-58bf6cf1a1b044e1.rmeta: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/traits.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/common.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/mod.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/decoder.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/encoder.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/../README.md
+
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/lib.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/traits.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/common.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/mod.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/reader/decoder.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/encoder.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.12.0/src/../README.md:

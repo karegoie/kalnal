@@ -1,0 +1,15 @@
+/workspaces/kalnal/target/debug/deps/kodama-3372b06aa344e1be.d: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/active.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/chain.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/condensed.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/dendrogram.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/generic.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/method.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/primitive.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/queue.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/spanning.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/union.rs
+
+/workspaces/kalnal/target/debug/deps/libkodama-3372b06aa344e1be.rmeta: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/active.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/chain.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/condensed.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/dendrogram.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/generic.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/method.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/primitive.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/queue.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/spanning.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/union.rs
+
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/lib.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/active.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/chain.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/condensed.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/dendrogram.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/generic.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/method.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/primitive.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/queue.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/spanning.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kodama-0.2.3/src/union.rs:
