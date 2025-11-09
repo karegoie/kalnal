@@ -23,16 +23,16 @@ struct Args {
     /// Output Newick file path
     output_file: String,
 
-    /// Number of k-mers to sample (also used as bootstrap replicates)
+    /// Number of k-mers to sample
     #[arg(short = 'n', long = "n-kmers", default_value_t = 1000)]
     n_kmers: usize,
-    /// Maximum positions to store per k-mer (safety cutoff to avoid memory explosion)
-    #[arg(long = "max-kmer-freq", default_value_t = 100000)]
-    max_kmer_freq: usize,
 }
 
-// Log-scale histogram bins (powers of 2)
-const BINS: &[usize] = &[0, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, usize::MAX];
+// Log-scale histogram bins (powers of 4, up to ~1G)
+const BINS: &[usize] = &[
+    0, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 
+    16777216, 67108864, 268435456, usize::MAX
+];
 
 fn main() {
     let args = Args::parse();
@@ -67,7 +67,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     
     // TWO-PASS STRATEGY
     // PASS 1: scan FASTA to collect unique canonical k-mers (no positions)
-    eprintln!("PASS 1: collecting unique canonical k-mers (k={})...", args.k);
+    eprintln!("Collecting unique canonical k-mers (k={})...", args.k);
     if args.k == 0 || args.k > 32 {
         return Err("k must be between 1 and 32 when packing into u64".into());
     }
@@ -80,7 +80,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Sampling: choose n_kmers from unique set
     let n_sample = args.n_kmers.min(unique_kmers.len());
     eprintln!("Sampling {} k-mers from the unique set...", n_sample);
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let mut all_kmers_vec: Vec<u64> = unique_kmers.into_iter().collect();
     let selected_kmers: Vec<u64> = all_kmers_vec
         .as_mut_slice()
@@ -88,11 +88,11 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .cloned()
         .collect();
 
-    eprintln!("PASS 2: scanning FASTA and building position index for sampled k-mers (max per k-mer={})...", args.max_kmer_freq);
+    eprintln!("Scanning FASTA and building position index for sampled k-mers...");
 
     // PASS 2: scan FASTA again and only record positions for sampled k-mers
     let sampled_set: HashSet<u64> = selected_kmers.iter().copied().collect();
-    let kmer_index = build_kmer_position_index_sampled(&contigs, args.k, &sampled_set, args.max_kmer_freq);
+    let kmer_index = build_kmer_position_index_sampled(&contigs, args.k, &sampled_set);
     eprintln!("Indexed positions for {} sampled k-mers", kmer_index.len());
 
     eprintln!("Building tree for each sampled k-mer and collecting bipartitions...");
@@ -100,10 +100,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let all_bipartitions: Vec<BTreeSet<BTreeSet<String>>> = selected_kmers
         .par_iter()
         .enumerate()
-        .map(|(i, kmer_u64)| {
-            if i % 100 == 0 && i > 0 {
-                eprintln!("  Processed {}/{} k-mers", i, n_sample);
-            }
+        .map(|(_i, kmer_u64)| {
 
             let histogram = calculate_interval_histogram_from_index_u64(
                 *kmer_u64,
@@ -113,6 +110,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             );
 
             let dist_matrix = histogram_to_distance_matrix(&histogram, BINS.len() - 1);
+            println!("Distance matrix for k-mer {:016x}:\n{:?}", kmer_u64, dist_matrix);
             let tree_newick = build_nj_tree_simple(&dist_matrix, &contig_ids);
             parse_bipartitions_from_newick(&tree_newick, &contig_ids)
         })
@@ -125,15 +123,11 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     
     let bootstrap_bipartitions: Vec<BTreeSet<BTreeSet<String>>> = (0..args.n_kmers)
         .into_par_iter()
-        .map(|i| {
-            if i % 10 == 0 && i > 0 {
-                eprintln!("  Bootstrap {}/{}", i, args.n_kmers);
-            }
-            
+        .map(|_i| {
             // Resample trees (k-mer trees) with replacement
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let resampled_indices: Vec<usize> = (0..n_sample)
-                .map(|_| rng.gen_range(0..all_bipartitions.len()))
+                .map(|_| rng.random_range(0..all_bipartitions.len()))
                 .collect();
             
             // Collect all bipartitions from resampled trees
@@ -253,32 +247,18 @@ fn build_kmer_position_index_sampled(
     contigs: &[(String, Vec<u8>)],
     k: usize,
     sampled: &HashSet<u64>,
-    max_freq: usize,
 ) -> HashMap<u64, Vec<(u32, u32)>> {
     let mut index: HashMap<u64, Vec<(u32, u32)>> = HashMap::new();
-    let mut saturated: HashSet<u64> = HashSet::new();
 
     for (contig_idx, (_id, seq)) in contigs.iter().enumerate() {
         for (pos, window) in seq.windows(k).enumerate() {
             if let Some(key) = canonical_kmer_u64(window) {
-                if saturated.contains(&key) {
-                    continue;
-                }
                 if !sampled.contains(&key) {
                     continue;
                 }
 
                 let entry = index.entry(key).or_insert_with(Vec::new);
-                if entry.len() >= max_freq {
-                    // mark saturated and drop further additions
-                    saturated.insert(key);
-                    // optionally free memory or shrink
-                    continue;
-                }
                 entry.push((contig_idx as u32, pos as u32));
-                if entry.len() >= max_freq {
-                    saturated.insert(key);
-                }
             }
         }
     }
@@ -504,9 +484,6 @@ fn annotate_newick_with_support(
     n_replicates: usize,
     all_labels: &[String],
 ) -> String {
-    // For simplicity, we'll parse the tree and add support values at internal nodes
-    // This is a simplified version - you may want to use a proper tree library
-    
     let mut result = String::new();
     let mut _depth = 0;
     let mut current_clade: Vec<BTreeSet<String>> = Vec::new();
@@ -515,15 +492,17 @@ fn annotate_newick_with_support(
     for ch in newick.chars() {
         match ch {
             '(' => {
+                if !label_buffer.is_empty() {
+                    result.push_str(&label_buffer);
+                    label_buffer.clear();
+                }
                 result.push(ch);
                 _depth += 1;
                 current_clade.push(BTreeSet::new());
             }
             ')' => {
                 if !label_buffer.is_empty() {
-                    if let Some(set) = current_clade.last_mut() {
-                        set.insert(clean_label(&label_buffer));
-                    }
+                    result.push_str(&label_buffer);
                     label_buffer.clear();
                 }
                 
@@ -545,28 +524,30 @@ fn annotate_newick_with_support(
             }
             ',' => {
                 if !label_buffer.is_empty() {
-                    if let Some(set) = current_clade.last_mut() {
-                        set.insert(clean_label(&label_buffer));
-                    }
+                    result.push_str(&label_buffer);
                     label_buffer.clear();
                 }
                 result.push(ch);
             }
             ':' => {
                 if !label_buffer.is_empty() {
-                    result.push_str(&label_buffer);
                     if let Some(set) = current_clade.last_mut() {
                         set.insert(clean_label(&label_buffer));
                     }
+                    result.push_str(&label_buffer);
                     label_buffer.clear();
                 }
                 result.push(ch);
             }
             ';' => {
+                if !label_buffer.is_empty() {
+                    result.push_str(&label_buffer);
+                    label_buffer.clear();
+                }
                 result.push(ch);
             }
             _ => {
-                if ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+                if ch.is_alphanumeric() || ch == '_' || ch == '-' || ch == '.' || ch == '+' || ch == 'e' || ch == 'E' {
                     label_buffer.push(ch);
                 } else if !ch.is_whitespace() {
                     if !label_buffer.is_empty() {
@@ -577,6 +558,10 @@ fn annotate_newick_with_support(
                 }
             }
         }
+    }
+
+    if !label_buffer.is_empty() {
+        result.push_str(&label_buffer);
     }
     
     result
