@@ -1,9 +1,9 @@
-use std::{env, error::Error};
+use std::{env, error::Error, path::PathBuf};
 
-/// Parsing command line k-size and input directory arguments
+/// Parsing command line k-size and fasta file path arguments
 pub struct Config {
     pub k: usize,
-    pub input_dir: String,
+    pub fasta_path: PathBuf,
 }
 
 impl Config {
@@ -17,11 +17,11 @@ impl Config {
             None => return Err("k-mer length input required".into()),
         };
 
-        let input_dir = match args.next() {
-            Some(arg) => arg,
-            None => return Err("input directory argument needed".into()),
+        let fasta_path = match args.next() {
+            Some(arg) => PathBuf::from(arg),
+            None => return Err("fasta file path argument needed".into()),
         };
 
-        Ok(Config { k, input_dir })
+        Ok(Config { k, fasta_path })
     }
 }

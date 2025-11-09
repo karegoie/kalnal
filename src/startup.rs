@@ -25,48 +25,34 @@ use std::{
 /// Useful: [Using a Custom Hash Function in Rust](https://docs.rs/hashers/1.0.1/hashers/#using-a-custom-hash-function-in-rust)
 type DashFx = DashMap<u64, i32, BuildHasherDefault<FxHasher>>;
 
-/// Run complete analysis: k-mer counting, clustering, and plotting
-pub fn run(input_dir: &str, k: usize) -> Result<(), Box<dyn Error>> {
+/// Run complete analysis: k-mer counting, clustering, and plotting on multi-record FASTA file
+pub fn run<P: AsRef<Path> + std::fmt::Debug>(fasta_path: P, k: usize) -> Result<(), Box<dyn Error>> {
     eprintln!("Starting k-mer analysis for k={}", k);
-    eprintln!("Input directory: {}", input_dir);
+    eprintln!("Input FASTA file: {}", fasta_path.as_ref().display());
     
-    // Find all .split.fa files in the directory
-    let paths = fs::read_dir(input_dir)?;
-    let mut split_files = Vec::new();
-    
-    for path in paths {
-        let path = path?.path();
-        if let Some(filename) = path.file_name() {
-            if let Some(name) = filename.to_str() {
-                if name.ends_with(".split.fa") {
-                    split_files.push(path);
-                }
-            }
-        }
-    }
-    
-    if split_files.is_empty() {
-        return Err(format!("No .split.fa files found in {}", input_dir).into());
-    }
-    
-    eprintln!("Found {} split files", split_files.len());
-    
-    // Count k-mers for each file
+    // Read all records from the FASTA file
+    let reader = fasta::Reader::from_file(&fasta_path)?;
     let mut all_kmer_counts: HashMap<String, HashMap<String, i32>> = HashMap::new();
     
-    for (idx, file_path) in split_files.iter().enumerate() {
-        let sample_name = file_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&format!("sample_{}", idx))
-            .replace(".split", "");
+    let mut record_count = 0;
+    for (idx, result) in reader.records().enumerate() {
+        let record = result?;
+        let record_id = record.id().to_string();
         
-        eprintln!("Processing sample {}/{}: {}", idx + 1, split_files.len(), sample_name);
+        eprintln!("Processing record {}: {}", idx + 1, record_id);
         
-        let kmer_counts = count_kmers(file_path, k)?;
-        all_kmer_counts.insert(sample_name, kmer_counts);
+        // Count k-mers for this specific record
+        let kmer_counts = count_kmers_from_record(&record, k)?;
+        all_kmer_counts.insert(record_id, kmer_counts);
+        
+        record_count += 1;
     }
     
+    if record_count == 0 {
+        return Err("No records found in the FASTA file".into());
+    }
+    
+    eprintln!("Found {} records in total", record_count);
     eprintln!("K-mer counting completed. Starting clustering...");
     
     // Prepare data matrix for clustering
@@ -90,14 +76,14 @@ pub fn run(input_dir: &str, k: usize) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Count k-mers in a single fasta file and return as HashMap
-fn count_kmers<P: AsRef<Path> + std::fmt::Debug>(
-    path: P,
-    k: usize,
-) -> Result<HashMap<String, i32>, Box<dyn Error>> {
-    let kmer_map = build_map(path, k)?;
+/// Count k-mers from a single FASTA record
+fn count_kmers_from_record(record: &fasta::Record, k: usize) -> Result<HashMap<String, i32>, Box<dyn Error>> {
+    let map: DashFx = DashMap::with_hasher(BuildHasherDefault::<FxHasher>::default());
     
-    let counts: HashMap<String, i32> = kmer_map
+    let seq: &[u8] = record.seq();
+    process_seq(seq, &k, &map);
+    
+    let counts: HashMap<String, i32> = map
         .into_iter()
         .par_bridge()
         .map(|(kmer, freq)| (Unpack::bit(kmer, k).0, freq))
@@ -108,31 +94,6 @@ fn count_kmers<P: AsRef<Path> + std::fmt::Debug>(
         .collect();
     
     Ok(counts)
-}
-
-/// Reads sequences from fasta records in parallel using [`rayon`](https://docs.rs/rayon/1.5.1/rayon/),
-/// using a customized [`dashmap`](https://docs.rs/dashmap/4.0.2/dashmap/struct.DashMap.html)
-/// with [`FxHasher`](https://docs.rs/fxhash/0.2.1/fxhash/struct.FxHasher.html) to update in parallel a
-/// hashmap of canonical k-mers (keys) and their frequency in the data (values)
-fn build_map<P: AsRef<Path> + std::fmt::Debug>(
-    path: P,
-    k: usize,
-) -> Result<DashFx, Box<dyn Error>> {
-    let map: DashFx = DashMap::with_hasher(BuildHasherDefault::<FxHasher>::default());
-
-    fasta::Reader::from_file(path)?
-        .records()
-        .into_iter()
-        .par_bridge()
-        .for_each(|r| {
-            let record = r.expect("Error reading fasta record.");
-
-            let seq: &[u8] = record.seq();
-
-            process_seq(seq, &k, &map);
-        });
-
-    Ok(map)
 }
 
 /// Ignore substrings containing `N`

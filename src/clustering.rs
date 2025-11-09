@@ -44,7 +44,7 @@ pub fn hierarchical_clustering(data: Array2<f64>) -> Result<Dendrogram, Box<dyn 
     })
 }
 
-/// Compute pairwise Euclidean distances between samples
+/// Compute pairwise Jaccard distances between samples
 fn compute_distance_matrix(data: &Array2<f64>) -> Array1<f64> {
     let n = data.nrows();
     let n_distances = (n * (n - 1)) / 2;
@@ -56,14 +56,31 @@ fn compute_distance_matrix(data: &Array2<f64>) -> Array1<f64> {
             let row_i = data.row(i);
             let row_j = data.row(j);
             
-            // Euclidean distance
-            let dist: f64 = row_i
-                .iter()
-                .zip(row_j.iter())
-                .map(|(a, b)| (a - b).powi(2))
-                .sum::<f64>()
-                .sqrt();
+            // Jaccard distance = 1 - Jaccard Index
+            // Jaccard Index = |A ∩ B| / |A ∪ B|
+            // For kmer counts, we treat non-zero values as presence
+            let mut intersection = 0.0;
+            let mut union = 0.0;
             
+            for (a, b) in row_i.iter().zip(row_j.iter()) {
+                let a_present = *a > 0.0;
+                let b_present = *b > 0.0;
+                
+                if a_present && b_present {
+                    intersection += 1.0;
+                }
+                if a_present || b_present {
+                    union += 1.0;
+                }
+            }
+            
+            let jaccard_index = if union > 0.0 {
+                intersection / union
+            } else {
+                0.0 // Both samples have no kmers
+            };
+            
+            let dist = 1.0 - jaccard_index;
             distances[idx] = dist;
             idx += 1;
         }
@@ -121,11 +138,18 @@ mod tests {
     
     #[test]
     fn test_distance_matrix() {
-        let data = Array2::from_shape_vec((3, 2), vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0]).unwrap();
+        let data = Array2::from_shape_vec((3, 2), vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]).unwrap();
         let distances = compute_distance_matrix(&data);
         
-        // Distance between (0,0) and (1,1) should be sqrt(2)
-        assert!((distances[0] - 2_f64.sqrt()).abs() < 1e-10);
+        // Distance between sample 0 {1,0} and sample 1 {1,1}
+        // Intersection: 1 (first kmer), Union: 2
+        // Jaccard Index = 1/2 = 0.5, Distance = 1 - 0.5 = 0.5
+        assert!((distances[0] - 0.5).abs() < 1e-10);
+        
+        // Distance between sample 0 {1,0} and sample 2 {0,1}
+        // Intersection: 0, Union: 2
+        // Jaccard Index = 0/2 = 0.0, Distance = 1.0
+        assert!((distances[1] - 1.0).abs() < 1e-10);
     }
     
     #[test]
